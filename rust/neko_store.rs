@@ -1,5 +1,8 @@
 //! neko_store — shared local AI store resolver for Neko Legends / ForPublic apps.
 //!
+//! Vendored module: not every app uses every public method, so allow dead_code.
+#![allow(dead_code)]
+//!
 //! This is a single-file, dependency-light module (only `serde_json`, which every
 //! Neko app already depends on). Vendor it by copying into `src-tauri/src/` and
 //! adding `mod neko_store;` to your `lib.rs`.
