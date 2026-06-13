@@ -1,3 +1,9 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  VENDORED FILE — DO NOT EDIT HERE (when copied into an app).               ║
+# ║  Canonical source: github.com/neko-legends/NekoLegendsAI-Shared           ║
+# ║                    python/neko_store.py                                    ║
+# ║  Fix the canonical copy, then re-vendor with neko_suite_doctor.py --fix.   ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
 """neko_store — shared local AI store helper for Neko Legends / ForPublic workers.
 
 Companion to ``neko_store.rs``. The Rust side resolves the store and exports

@@ -39,6 +39,12 @@ SHARED_REPO = Path(__file__).resolve().parent.parent
 SUITE_ROOT = SHARED_REPO.parent
 
 CANONICAL_RUST = SHARED_REPO / "rust" / "neko_store.rs"
+# Vendored Rust modules: (canonical path, basename copied into each app's src-tauri/src/).
+# Add new shared modules here (e.g. neko_agent.rs) and they are drift-checked too.
+VENDORED_RUST_MODULES = [
+    SHARED_REPO / "rust" / "neko_store.rs",
+    SHARED_REPO / "rust" / "neko_agent.rs",
+]
 CONTROL_CENTER_MAIN = SUITE_ROOT / "NekoLegendsControlCenter" / "src-tauri" / "src" / "main.rs"
 PORT_REGISTRY_DOC = SUITE_ROOT / "AGENT_API_PORTS.md"
 
@@ -67,48 +73,64 @@ def normalized_hash(path: Path) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def find_vendored_copies() -> list[Path]:
-    """Every <suite_root>/<app>/src-tauri/src/neko_store.rs except the canonical."""
+def find_vendored_copies(basename: str) -> list[Path]:
+    """Every <suite_root>/<app>/src-tauri/src/<basename> across sibling apps."""
     copies: list[Path] = []
     for app_dir in sorted(SUITE_ROOT.iterdir()):
         if not app_dir.is_dir():
             continue
-        candidate = app_dir / "src-tauri" / "src" / "neko_store.rs"
+        candidate = app_dir / "src-tauri" / "src" / basename
         if candidate.exists():
             copies.append(candidate)
     return copies
 
 
-def check_drift(quiet: bool) -> list[str]:
-    """Return a list of problem strings (empty = OK)."""
-    problems: list[str] = []
-    if not CANONICAL_RUST.exists():
-        return [f"Canonical module missing: {CANONICAL_RUST}"]
+def check_drift(quiet: bool, fix: bool = False) -> list[str]:
+    """Return a list of problem strings (empty = OK).
 
-    canonical = normalized_hash(CANONICAL_RUST)
-    copies = find_vendored_copies()
+    Checks every canonical module in VENDORED_RUST_MODULES that exists. When
+    ``fix`` is True, any drifted copy is re-vendored from canonical instead of
+    being reported as a problem.
+    """
+    problems: list[str] = []
 
     if not quiet:
         print(c("● Vendored module drift", YELLOW))
-        print(f"  canonical: {DIM if _supports_color() else ''}{CANONICAL_RUST}{RESET if _supports_color() else ''}")
 
-    if not copies:
-        if not quiet:
-            print("  (no vendored copies found)")
+    canonicals = [m for m in VENDORED_RUST_MODULES if m.exists()]
+    if not canonicals:
+        problems.append("No canonical vendored modules found in NekoLegendsAI-Shared/rust/.")
         return problems
 
-    for copy in copies:
-        app = copy.relative_to(SUITE_ROOT).parts[0]
-        if normalized_hash(copy) == canonical:
-            if not quiet:
-                print(f"  {c('✓', GREEN)} {app}")
-        else:
-            problems.append(
-                f"DRIFT: {app} vendored neko_store.rs differs from canonical.\n"
-                f"       fix: cp '{CANONICAL_RUST}' '{copy}'"
-            )
-            if not quiet:
-                print(f"  {c('✗', RED)} {app}  (out of sync)")
+    for canonical_path in canonicals:
+        basename = canonical_path.name
+        canonical = normalized_hash(canonical_path)
+        copies = find_vendored_copies(basename)
+
+        if not quiet:
+            label = DIM if _supports_color() else ""
+            end = RESET if _supports_color() else ""
+            print(f"  {basename} {label}({len(copies)} copies){end}")
+
+        if not copies:
+            continue
+
+        for copy in copies:
+            app = copy.relative_to(SUITE_ROOT).parts[0]
+            if normalized_hash(copy) == canonical:
+                if not quiet:
+                    print(f"    {c('✓', GREEN)} {app}")
+            elif fix:
+                copy.write_bytes(canonical_path.read_bytes())
+                if not quiet:
+                    print(f"    {c('⟳', GREEN)} {app}  (re-vendored from canonical)")
+            else:
+                problems.append(
+                    f"DRIFT: {app}/{basename} differs from canonical.\n"
+                    f"       fix: run with --fix, or cp '{canonical_path}' '{copy}'"
+                )
+                if not quiet:
+                    print(f"    {c('✗', RED)} {app}  (out of sync)")
     return problems
 
 
@@ -198,6 +220,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Neko Legends suite invariant checker.")
     parser.add_argument("--write-registry", action="store_true",
                         help="Regenerate AGENT_API_PORTS.md from the Control Center source.")
+    parser.add_argument("--fix", action="store_true",
+                        help="Re-vendor canonical modules into any drifted app copies.")
     parser.add_argument("--quiet", action="store_true", help="Only print problems.")
     args = parser.parse_args()
 
@@ -206,7 +230,7 @@ def main() -> int:
         print()
 
     problems: list[str] = []
-    problems += check_drift(args.quiet)
+    problems += check_drift(args.quiet, fix=args.fix)
     problems += check_ports(args.quiet)
 
     if args.write_registry:
