@@ -124,6 +124,21 @@ cd rust && # vendored into any crate, or use the throwaway selftest crate
 cargo test
 ```
 
+## Maintenance (suite-wide invariant checker)
+
+Because `neko_store.rs` is **vendored** (copied) into each app and agent-API
+ports are assigned by hand, two things can silently drift: an app's copy of the
+module falling behind canonical, and two apps claiming the same port. A small
+checker guards both — run it before a release or after adding/renaming an app:
+
+```
+python scripts/neko_suite_doctor.py                  # exit 1 on any problem
+python scripts/neko_suite_doctor.py --write-registry # regenerate AGENT_API_PORTS.md
+```
+
+See [`scripts/README.md`](scripts/README.md). It assumes the suite repos are
+checked out as siblings under one folder.
+
 ## License
 
 MIT.
