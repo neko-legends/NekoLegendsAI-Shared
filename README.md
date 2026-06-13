@@ -2,32 +2,45 @@
 
 Shared **local AI store** convention for the Neko Legends / ForPublic app suite.
 
-This repo is the single source of truth for how every GPU app in the suite finds
-(or creates) one shared, **visible** folder — `NekoLegendsAI/` — so that:
+## Problem
+
+Every GPU app in the suite (DepthMap, Hunyuan 3D, Multi-Angle Edit, …) installs
+its **own** copy of PyTorch + CUDA wheels (multi-GB each) and re-downloads the
+**same** Hugging Face models. Five apps means five copies of torch and five
+copies of every model — tens of gigabytes of pure duplication, and a long
+download every time you add another app.
+
+The naive fix — one shared virtual environment — just trades the problem for
+dependency-version conflicts (app A wants torch 2.7, app B pins 2.4, both break),
+and a mandatory shared folder breaks the "download one portable `.exe` and it
+just works" promise.
+
+## Solution
+
+One flat, **visible** shared folder — `NekoLegendsAI/` — that every app discovers
+by convention, with a guaranteed standalone fallback:
 
 - Hugging Face **models download once** (shared `HF_HOME`).
 - PyTorch / CUDA wheels are **cached once** (shared pip + uv caches). With `uv`,
-  packages are hardlinked into each app's venv on the same volume, so the bytes
-  exist once on disk instead of once *per app*.
+  packages are hardlinked into each app's own venv on the same volume, so the
+  bytes exist once on disk — **no shared venv, so no version conflicts**.
+- It's a **convention with discovery + fallback, never a dependency**. A portable
+  app with nothing else installed still works. The Neko Legends Control Center,
+  *if present*, only points at and manages the store — it is never required.
 
-It is shipped as two small, dependency-light files you **vendor** (copy) into
-each app, not a package you depend on. That keeps every app fully standalone.
+Shipped as two small, dependency-light files you **vendor** (copy) into each app,
+which is what keeps every app fully standalone:
 
 ```
 rust/neko_store.rs     # resolver: discovers/creates the store, exports env vars
 python/neko_store.py   # worker helper: reads the env vars, uv-aware venv bootstrap
 ```
 
-## The one rule that shapes everything
+---
 
-> The shared store is a **convention with discovery + fallback**, never a
-> dependency. A portable app with nothing else installed still works. The Neko
-> Legends Control Center, *if present*, only points at and manages the store — it
-> is never required.
+## How discovery works (first hit wins)
 
-## Discovery order (first hit wins)
-
-1. **Per-app override** env var `NEKO_<APP>_STORE` (e.g. `NEKO_ANGLEFORGE_STORE`).
+1. **Per-app override** env var `NEKO_<APP>_STORE` (e.g. `NEKO_MULTIANGLEEDIT_STORE`).
 2. **Global** env var `NEKO_AI_HOME`.
 3. **Pointer file** `<home>/NekoLegendsAI/store.json` (`{"root": "..."}`).
 4. **Default visible folder** `<volume-of-app>/NekoLegendsAI` (e.g. `D:\NekoLegendsAI`).
@@ -72,7 +85,7 @@ about this; standalone apps just accept it.
 
    ```rust
    let app_data = app_data_dir(app)?;
-   let store = neko_store::NekoStore::resolve("angleforge", &app_data);
+   let store = neko_store::NekoStore::resolve("multiangleedit", &app_data);
    let env_dir = store.env_dir.clone();          // replaces app_data.join("python-env")
    let models  = store.models_dir.clone();       // replaces app_data.join("models")
    // ...when spawning the Python worker:
@@ -88,7 +101,7 @@ about this; standalone apps just accept it.
 
    ```python
    from neko_store import StoreContext
-   store = StoreContext.from_env(app_slug="angleforge", env_dir=job_env_dir)
+   store = StoreContext.from_env(app_slug="multiangleedit", env_dir=job_env_dir)
    python = store.ensure_venv("3.11")            # uv-preferred, hardlinked
    store.pip_install(python, ["torch==2.7.1+cu128"],
                      index_url="https://download.pytorch.org/whl/cu128")
