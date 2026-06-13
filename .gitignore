@@ -1,0 +1,14 @@
+# Throwaway selftest crate
+/_selftest/target/
+/_selftest/Cargo.lock
+
+# Rust
+target/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+Thumbs.db
+.DS_Store
