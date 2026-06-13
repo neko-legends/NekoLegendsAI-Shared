@@ -20,12 +20,38 @@ Checks two things that are easy to break by hand:
 
 ```bash
 python scripts/neko_suite_doctor.py                  # check; exit 1 on any problem
-python scripts/neko_suite_doctor.py --quiet          # only print problems (CI)
+python scripts/neko_suite_doctor.py --quiet          # only print problems (CI / hook)
+python scripts/neko_suite_doctor.py --fix            # re-vendor canonical into drifted apps
 python scripts/neko_suite_doctor.py --write-registry # regenerate AGENT_API_PORTS.md
 ```
 
 Exit code 0 = all invariants hold; non-zero = at least one problem. Run it before
 tagging a release, or after adding/renaming an app or changing an agent port.
+
+## install-hooks.sh
+
+Installs a **pre-commit hook** into each sibling app repo that runs
+`neko_suite_doctor.py --quiet` and **blocks the commit** if a vendored module
+drifted or two apps share a port. Git hooks aren't shared by clone, so run this
+once per machine:
+
+```bash
+bash scripts/install-hooks.sh            # install into every sibling repo
+bash scripts/install-hooks.sh MyApp      # install into named repos only
+```
+
+The hook degrades gracefully: if `NekoLegendsAI-Shared` isn't checked out as a
+sibling (e.g. someone cloned just one app), it skips rather than blocks. To bypass
+once: `git commit --no-verify`.
+
+## Defense in depth
+
+These layers stack so the vendoring convention is hard to break by accident:
+
+1. **In-file banner** at the top of each vendored module ("DO NOT EDIT HERE").
+2. **Per-repo `AGENTS.md`** steering AI coding agents away from editing copies.
+3. **Pre-commit hook** that blocks drifted/colliding commits (detection).
+4. **`--fix`** that re-vendors canonical into every app (one-command correction).
 
 ### Why these checks exist
 
