@@ -79,13 +79,31 @@ impl NekoStore {
             .to_ascii_uppercase()
     }
 
-    /// Resolve the store for an app.
+    /// Resolve the store for an app, defaulting the shared-store volume to the
+    /// app's own data dir volume.
     ///
     /// * `app_slug` — short app identifier, e.g. `"angleforge"`. Used for the
     ///   per-app override env var and the per-app venv subfolder.
     /// * `app_local_fallback` — the app's own private data dir to use if no
     ///   shared store can be created (keeps portable apps fully self-contained).
     pub fn resolve(app_slug: &str, app_local_fallback: &Path) -> NekoStore {
+        Self::resolve_with_volume_hint(app_slug, app_local_fallback, None)
+    }
+
+    /// Resolve the store, optionally preferring a different volume for the
+    /// default shared-store location.
+    ///
+    /// On Windows the Tauri app-data dir lives on `C:`, but portable apps are
+    /// often installed on a big data drive (e.g. `D:`). Passing the executable's
+    /// directory as `volume_hint` makes the default store land on that drive
+    /// (`D:\NekoLegendsAI`) with zero configuration — models are huge and belong
+    /// on the roomy drive next to the app. Discovery steps 1–3 (env vars and the
+    /// pointer file) always override this hint.
+    pub fn resolve_with_volume_hint(
+        app_slug: &str,
+        app_local_fallback: &Path,
+        volume_hint: Option<&Path>,
+    ) -> NekoStore {
         let token = Self::app_env_token(app_slug);
 
         // 1. Per-app override.
@@ -110,8 +128,11 @@ impl NekoStore {
             }
         }
 
-        // 4. Default visible folder on the same volume as the app.
-        if let Some(root) = default_store_root(app_local_fallback) {
+        // 4. Default visible folder on the same volume as the app. Prefer the
+        //    caller's volume hint (e.g. the executable dir on a big data drive),
+        //    falling back to the app-local data dir's volume.
+        let volume_basis = volume_hint.unwrap_or(app_local_fallback);
+        if let Some(root) = default_store_root(volume_basis) {
             if let Some(store) = Self::try_build(&root, app_slug) {
                 // Best-effort: drop a pointer file so sibling apps discover it too.
                 let _ = write_pointer_root(&root);
@@ -422,5 +443,21 @@ mod tests {
         let second = fs::read_to_string(&marker).unwrap();
         assert_eq!(first, second);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn env_var_overrides_volume_hint() {
+        // When an override env var is set, the volume hint must be ignored.
+        let override_root = temp_dir("vh-override");
+        let fallback = temp_dir("vh-fallback");
+        let hint = temp_dir("vh-hint");
+        std::env::set_var("NEKO_VHAPP_STORE", &override_root);
+
+        let store = NekoStore::resolve_with_volume_hint("vhapp", &fallback, Some(&hint));
+        assert!(store.root.starts_with(&override_root));
+
+        std::env::remove_var("NEKO_VHAPP_STORE");
+        let _ = fs::remove_dir_all(&override_root);
+        let _ = fs::remove_dir_all(&fallback);
     }
 }
