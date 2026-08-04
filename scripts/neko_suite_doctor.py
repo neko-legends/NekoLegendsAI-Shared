@@ -45,8 +45,38 @@ VENDORED_RUST_MODULES = [
     SHARED_REPO / "rust" / "neko_store.rs",
     SHARED_REPO / "rust" / "neko_agent.rs",
 ]
-CONTROL_CENTER_MAIN = SUITE_ROOT / "NekoLegendsControlCenter" / "src-tauri" / "src" / "main.rs"
 PORT_REGISTRY_DOC = SUITE_ROOT / "AGENT_API_PORTS.md"
+
+
+def _resolve_control_center_main() -> Path | None:
+    """Find the control center's main.rs.
+
+    Resilient to the repo being renamed: check the known folder names, then
+    fall back to discovering a sibling whose Cargo manifest declares the
+    `neko-legends-control-center` package.
+    """
+    for name in ("neko-legends-control-center", "NekoLegendsControlCenter"):
+        candidate = SUITE_ROOT / name / "src-tauri" / "src" / "main.rs"
+        if candidate.exists():
+            return candidate
+    for app_dir in sorted(SUITE_ROOT.iterdir()):
+        if not app_dir.is_dir():
+            continue
+        cargo = app_dir / "src-tauri" / "Cargo.toml"
+        if not cargo.exists():
+            continue
+        try:
+            text = cargo.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if 'name = "neko-legends-control-center"' in text:
+            main = app_dir / "src-tauri" / "src" / "main.rs"
+            if main.exists():
+                return main
+    return None
+
+
+CONTROL_CENTER_MAIN = _resolve_control_center_main()
 
 GREEN = "\033[32m"
 RED = "\033[31m"
@@ -139,7 +169,7 @@ def parse_agent_ports() -> list[tuple[str, str, int]]:
 
     Returns list of (app_id, app_name, port).
     """
-    if not CONTROL_CENTER_MAIN.exists():
+    if CONTROL_CENTER_MAIN is None or not CONTROL_CENTER_MAIN.exists():
         return []
     text = CONTROL_CENTER_MAIN.read_text(encoding="utf-8", errors="replace")
     # default_agent_api_entry(
@@ -159,13 +189,17 @@ def parse_agent_ports() -> list[tuple[str, str, int]]:
 def check_ports(quiet: bool) -> list[str]:
     problems: list[str] = []
     entries = parse_agent_ports()
+    source_label = CONTROL_CENTER_MAIN if CONTROL_CENTER_MAIN is not None else "(control center not found)"
 
     if not quiet:
         print(c("\n● Agent API port collisions", YELLOW))
-        print(f"  source: {DIM if _supports_color() else ''}{CONTROL_CENTER_MAIN}{RESET if _supports_color() else ''}")
+        print(f"  source: {DIM if _supports_color() else ''}{source_label}{RESET if _supports_color() else ''}")
 
     if not entries:
-        problems.append(f"Could not parse any agent ports from {CONTROL_CENTER_MAIN}")
+        if CONTROL_CENTER_MAIN is None:
+            problems.append("Could not locate the control center repo; skipping port check.")
+        else:
+            problems.append(f"Could not parse any agent ports from {CONTROL_CENTER_MAIN}")
         return problems
 
     by_port: dict[int, list[str]] = {}
@@ -197,7 +231,7 @@ def write_registry() -> None:
         "# Agent API Port Registry",
         "",
         "> **Auto-generated** by `NekoLegendsAI-Shared/scripts/neko_suite_doctor.py`",
-        "> from `NekoLegendsControlCenter/src-tauri/src/main.rs`"
+        "> from `neko-legends-control-center/src-tauri/src/main.rs`"
         " (`default_agent_api_entries`).",
         "> Do not edit by hand — change the Rust source, then run"
         " `neko_suite_doctor.py --write-registry`.",
